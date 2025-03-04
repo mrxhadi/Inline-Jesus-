@@ -71,20 +71,25 @@ async def handle_archive_channel(message):
             })
 
 async def save_song_from_inline_channel(message):
-    if "audio" in message:
-        audio = message["audio"]
-        file_id = audio["file_id"]
-        title = audio.get("title", "نامشخص")
-        performer = audio.get("performer", "نامشخص")
+    try:
+        if "audio" in message:
+            audio = message["audio"]
+            file_id = audio["file_id"]
+            title = audio.get("title", "نامشخص")
+            performer = audio.get("performer", "نامشخص")
 
-        inline_song_database.append({
-            "file_id": file_id,
-            "title": title,
-            "performer": performer,
-            "chat_id": INLINE_ARCHIVE_CHANNEL_ID
-        })
-        save_database(inline_song_database)
-        print(f"آهنگ جدید ذخیره شد: {title} - {performer}")
+            inline_song_database.append({
+                "file_id": file_id,
+                "title": title,
+                "performer": performer,
+                "chat_id": INLINE_ARCHIVE_CHANNEL_ID
+            })
+            save_database(inline_song_database)
+            print(f"✅ آهنگ جدید ذخیره شد: {title} - {performer}")
+        else:
+            print("⚠️ پیام دریافتی فاقد فایل صوتی است.")
+    except Exception as e:
+        print(f"❌ خطا در ذخیره‌سازی آهنگ از چنل اینلاین: {e}")
 
 async def handle_inline_query(query_id, query):
     results = []
@@ -110,8 +115,14 @@ async def check_updates():
     while True:
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                response = await client.get(f"{BASE_URL}/getUpdates", params={"offset": last_update_id, "timeout": 30})
-                updates = response.json().get("result", [])
+                response = await client.get(
+                    f"{BASE_URL}/getUpdates",
+                    params={"offset": last_update_id, "timeout": 30}
+                )
+                data = response.json()
+                print(f"داده دریافتی از getUpdates: {data}")
+
+                updates = data.get("result", [])
 
             for update in updates:
                 last_update_id = update["update_id"] + 1
@@ -120,6 +131,7 @@ async def check_updates():
 
                 if message:
                     chat_id = message["chat"]["id"]
+                    print(f"پیام جدید: {message}")
 
                     if "document" in message:
                         await handle_document(message["document"], chat_id)
@@ -132,10 +144,13 @@ async def check_updates():
                             await send_file_to_user(chat_id)
 
                 elif inline_query:
+                    print(f"کوئری اینلاین جدید: {inline_query}")
                     await handle_inline_query(inline_query["id"], inline_query["query"])
 
+            await asyncio.sleep(1)
+
         except Exception as e:
-            print(f"⚠️ خطا: {e}")
+            print(f"❌ خطا در check_updates: {e}")
             await asyncio.sleep(5)
 
 async def main():
