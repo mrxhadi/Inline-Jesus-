@@ -130,7 +130,7 @@ async def check_updates():
                     if "document" in message:
                         await handle_document(message["document"], chat_id)
                     elif chat_id == MAIN_ARCHIVE_CHANNEL_ID:
-                        await handle_archive_channel(message)
+                        await handle_inline_archive_channel(message)
                     elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
                         await handle_inline_archive_channel(message)
                     elif "text" in message and message["text"] == "/list":
