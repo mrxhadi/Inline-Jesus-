@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import httpx
+import traceback
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MAIN_ARCHIVE_CHANNEL_ID = int(os.getenv("MAIN_ARCHIVE_CHANNEL_ID"))
@@ -90,6 +91,7 @@ async def save_song_from_inline_channel(message):
             print("⚠️ پیام دریافتی فاقد فایل صوتی است.")
     except Exception as e:
         print(f"❌ خطا در ذخیره‌سازی آهنگ از چنل اینلاین: {e}")
+        traceback.print_exc()
 
 async def handle_inline_query(query_id, query):
     results = []
@@ -122,35 +124,46 @@ async def check_updates():
                 data = response.json()
                 print(f"داده دریافتی از getUpdates: {data}")
 
+                if data.get("error_code") == 409:
+                    print("❌ خطای 409: تداخل در اجرای ربات. متوقف می‌شود.")
+                    break
+
                 updates = data.get("result", [])
 
             for update in updates:
+                print(f"بررسی آپدیت جدید: {update}")
                 last_update_id = update["update_id"] + 1
-                message = update.get("message")
-                inline_query = update.get("inline_query")
 
-                if message:
+                if "message" in update:
+                    message = update["message"]
                     chat_id = message["chat"]["id"]
                     print(f"پیام جدید: {message}")
 
-                    if "document" in message:
+                    if "audio" in message:
+                        if chat_id == MAIN_ARCHIVE_CHANNEL_ID:
+                            await handle_archive_channel(message)
+                        elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
+                            await save_song_from_inline_channel(message)
+                    elif "document" in message and chat_id not in [MAIN_ARCHIVE_CHANNEL_ID, INLINE_ARCHIVE_CHANNEL_ID]:
                         await handle_document(message["document"], chat_id)
-                    elif chat_id == MAIN_ARCHIVE_CHANNEL_ID:
-                        await handle_archive_channel(message)
-                    elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
-                        await save_song_from_inline_channel(message)
-                    elif chat_id != MAIN_ARCHIVE_CHANNEL_ID and chat_id != INLINE_ARCHIVE_CHANNEL_ID:
-                        if "text" in message and message["text"] == "/list":
-                            await send_file_to_user(chat_id)
+                    elif "text" in message and message["text"] == "/list" and chat_id not in [MAIN_ARCHIVE_CHANNEL_ID, INLINE_ARCHIVE_CHANNEL_ID]:
+                        await send_file_to_user(chat_id)
+                    else:
+                        print("⚠️ پیام نامرتبط دریافت شد. نادیده گرفته می‌شود.")
 
-                elif inline_query:
+                elif "inline_query" in update:
+                    inline_query = update["inline_query"]
                     print(f"کوئری اینلاین جدید: {inline_query}")
                     await handle_inline_query(inline_query["id"], inline_query["query"])
+
+                else:
+                    print("⚠️ آپدیت نامرتبط دریافت شد و نادیده گرفته می‌شود.")
 
             await asyncio.sleep(1)
 
         except Exception as e:
             print(f"❌ خطا در check_updates: {e}")
+            traceback.print_exc()
             await asyncio.sleep(5)
 
 async def main():
