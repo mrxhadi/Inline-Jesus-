@@ -4,7 +4,7 @@ import asyncio
 import httpx
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ARCHIVE_CHANNEL_ID = int(os.getenv("ARCHIVE_CHANNEL_ID"))
+MAIN_ARCHIVE_CHANNEL_ID = int(os.getenv("MAIN_ARCHIVE_CHANNEL_ID"))
 INLINE_ARCHIVE_CHANNEL_ID = int(os.getenv("INLINE_ARCHIVE_CHANNEL_ID"))
 DATABASE_FILE = "inline_songs.json"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -62,7 +62,7 @@ async def handle_archive_channel(message):
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{BASE_URL}/copyMessage", params={
                 "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
-                "from_chat_id": ARCHIVE_CHANNEL_ID,
+                "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
                 "message_id": message["message_id"]
             })
             result = response.json()
@@ -129,7 +129,7 @@ async def check_updates():
 
                     if "document" in message:
                         await handle_document(message["document"], chat_id)
-                    elif chat_id == ARCHIVE_CHANNEL_ID:
+                    elif chat_id == MAIN_ARCHIVE_CHANNEL_ID:
                         await handle_archive_channel(message)
                     elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
                         await handle_inline_archive_channel(message)
