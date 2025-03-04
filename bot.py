@@ -62,30 +62,6 @@ async def save_audio(message):
         print(f"❌ خطا در ذخیره‌سازی آهنگ: {e}")
         traceback.print_exc()
 
-async def handle_inline_query(query_id, query):
-    results = [
-        {
-            "type": "audio",
-            "id": str(idx),
-            "audio_file_id": song["file_id"],
-            "title": song["title"],
-            "performer": song["performer"]
-        }
-        for idx, song in enumerate(inline_song_database)
-        if query.lower() in song.get("title", "").lower()
-    ]
-
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            await client.post(f"{BASE_URL}/answerInlineQuery", json={
-                "inline_query_id": query_id,
-                "results": results,
-                "cache_time": 0
-            })
-    except httpx.HTTPError as e:
-        print(f"❌ خطا در پاسخ به اینلاین کوئری: {e}")
-        traceback.print_exc()
-
 async def send_database(chat_id):
     if not os.path.exists(DATABASE_FILE):
         await send_message(chat_id, "❌ دیتابیس یافت نشد.")
@@ -157,10 +133,6 @@ async def check_updates():
 
                     if "text" in message and message["text"] == "/list":
                         await send_database(chat_id)
-
-                elif "inline_query" in update:
-                    inline_query = update["inline_query"]
-                    await handle_inline_query(inline_query["id"], inline_query["query"])
 
             await asyncio.sleep(1)
 
