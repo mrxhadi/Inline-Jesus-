@@ -31,30 +31,62 @@ async def send_message(chat_id, text):
         print(f"❌ خطا در ارسال پیام: {e}")
         traceback.print_exc()
 
-async def handle_document(document, chat_id):
-    if document["file_name"] != DATABASE_FILE:
-        await send_message(chat_id, "لطفاً فایل inline_songs.json را ارسال کنید.")
-        return
-
-    file_id = document["file_id"]
+async def forward_audio(message_id):
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            file_info = await client.get(f"{BASE_URL}/getFile", params={"file_id": file_id})
-            file_path = file_info.json()["result"]["file_path"]
-            file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-            response = await client.get(file_url)
+            await client.get(f"{BASE_URL}/copyMessage", params={
+                "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
+                "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
+                "message_id": message_id
+            })
     except httpx.HTTPError as e:
-        print(f"❌ خطا در دریافت فایل دیتابیس: {e}")
+        print(f"❌ خطا در فوروارد آهنگ: {e}")
         traceback.print_exc()
-        return
 
-    with open(DATABASE_FILE, "wb") as file:
-        file.write(response.content)
+async def save_audio(message):
+    try:
+        audio = message.get("audio")
+        if not audio:
+            print("⚠️ پیام فاقد فایل صوتی است.")
+            return
 
-    inline_song_database[:] = load_database()
-    await send_message(chat_id, f"✅ دیتابیس بروزرسانی شد. تعداد آهنگ‌ها: {len(inline_song_database)}")
+        inline_song_database.append({
+            "file_id": audio["file_id"],
+            "title": audio.get("title", "نامشخص"),
+            "performer": audio.get("performer", "نامشخص"),
+            "chat_id": INLINE_ARCHIVE_CHANNEL_ID
+        })
+        save_database(inline_song_database)
+        print(f"✅ آهنگ ذخیره شد: {audio.get('title', 'نامشخص')} - {audio.get('performer', 'نامشخص')}")
+    except Exception as e:
+        print(f"❌ خطا در ذخیره‌سازی آهنگ: {e}")
+        traceback.print_exc()
 
-async def send_file_to_user(chat_id):
+async def handle_inline_query(query_id, query):
+    results = [
+        {
+            "type": "audio",
+            "id": str(idx),
+            "audio_file_id": song["file_id"],
+            "title": song["title"],
+            "performer": song["performer"]
+        }
+        for idx, song in enumerate(inline_song_database)
+        if query.lower() in song.get("title", "").lower()
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            await client.post(f"{BASE_URL}/answerInlineQuery", json={
+                "inline_query_id": query_id,
+                "results": results,
+                "cache_time": 0
+            })
+    except httpx.HTTPError as e:
+        print(f"❌ خطا در پاسخ به اینلاین کوئری: {e}")
+        traceback.print_exc()
+
+async def send_database(chat_id):
     if not os.path.exists(DATABASE_FILE):
         await send_message(chat_id, "❌ دیتابیس یافت نشد.")
         return
@@ -68,66 +100,31 @@ async def send_file_to_user(chat_id):
                     files={"document": (DATABASE_FILE, file, "application/json")}
                 )
     except httpx.HTTPError as e:
-        print(f"❌ خطا در ارسال فایل دیتابیس: {e}")
+        print(f"❌ خطا در ارسال دیتابیس: {e}")
         traceback.print_exc()
 
-async def handle_archive_channel(message):
-    if "audio" in message:
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                await client.get(f"{BASE_URL}/copyMessage", params={
-                    "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
-                    "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
-                    "message_id": message["message_id"]
-                })
-        except httpx.HTTPError as e:
-            print(f"❌ خطا در فوروارد پیام: {e}")
-            traceback.print_exc()
+async def update_database(document):
+    if document["file_name"] != DATABASE_FILE:
+        return "❌ لطفاً فایل inline_songs.json را ارسال کنید."
 
-async def save_song_from_inline_channel(message):
-    try:
-        if "audio" in message:
-            audio = message["audio"]
-            file_id = audio["file_id"]
-            title = audio.get("title", "نامشخص")
-            performer = audio.get("performer", "نامشخص")
-
-            inline_song_database.append({
-                "file_id": file_id,
-                "title": title,
-                "performer": performer,
-                "chat_id": INLINE_ARCHIVE_CHANNEL_ID
-            })
-            save_database(inline_song_database)
-            print(f"✅ آهنگ جدید ذخیره شد: {title} - {performer}")
-        else:
-            print("⚠️ پیام دریافتی فاقد فایل صوتی است.")
-    except Exception as e:
-        print(f"❌ خطا در ذخیره‌سازی آهنگ از چنل اینلاین: {e}")
-        traceback.print_exc()
-
-async def handle_inline_query(query_id, query):
-    results = []
-    for idx, song in enumerate(inline_song_database):
-        if query.lower() in song.get("title", "").lower():
-            results.append({
-                "type": "audio",
-                "id": str(idx),
-                "audio_file_id": song["file_id"],
-                "title": song["title"],
-                "performer": song["performer"]
-            })
-
+    file_id = document["file_id"]
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            await client.post(f"{BASE_URL}/answerInlineQuery", json={
-                "inline_query_id": query_id,
-                "results": results,
-                "cache_time": 0
-            })
+            file_info = await client.get(f"{BASE_URL}/getFile", params={"file_id": file_id})
+            file_path = file_info.json()["result"]["file_path"]
+            file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+            response = await client.get(file_url)
+
+        with open(DATABASE_FILE, "wb") as file:
+            file.write(response.content)
+
+        inline_song_database[:] = load_database()
+        return f"✅ دیتابیس بروزرسانی شد. تعداد آهنگ‌ها: {len(inline_song_database)}"
+
     except httpx.HTTPError as e:
-        print(f"❌ خطا در پاسخ به اینلاین کوئری: {e}")
+        print(f"❌ خطا در بروزرسانی دیتابیس: {e}")
         traceback.print_exc()
+        return "❌ خطا در بروزرسانی دیتابیس رخ داد."
 
 async def check_updates():
     last_update_id = None
@@ -139,51 +136,40 @@ async def check_updates():
                     params={"offset": last_update_id, "timeout": 30}
                 )
                 data = response.json()
-                print(f"داده دریافتی از getUpdates: {data}")
-
-                if data.get("error_code") == 409:
-                    print("❌ خطای 409: تداخل در اجرای ربات. متوقف می‌شود.")
-                    break
-
                 updates = data.get("result", [])
 
             for update in updates:
-                print(f"بررسی آپدیت جدید: {update}")
                 last_update_id = update["update_id"] + 1
 
                 if "message" in update:
                     message = update["message"]
                     chat_id = message["chat"]["id"]
-                    print(f"پیام جدید: {message}")
 
-                    if "audio" in message:
-                        if chat_id == MAIN_ARCHIVE_CHANNEL_ID:
-                            await handle_archive_channel(message)
-                        elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
-                            await save_song_from_inline_channel(message)
-                    elif "document" in message and chat_id not in [MAIN_ARCHIVE_CHANNEL_ID, INLINE_ARCHIVE_CHANNEL_ID]:
-                        await handle_document(message["document"], chat_id)
-                    elif "text" in message and message["text"] == "/list" and chat_id not in [MAIN_ARCHIVE_CHANNEL_ID, INLINE_ARCHIVE_CHANNEL_ID]:
-                        await send_file_to_user(chat_id)
-                    else:
-                        print("⚠️ پیام نامرتبط دریافت شد. نادیده گرفته می‌شود.")
+                    if chat_id == MAIN_ARCHIVE_CHANNEL_ID and "audio" in message:
+                        await forward_audio(message["message_id"])
+
+                    if chat_id == INLINE_ARCHIVE_CHANNEL_ID and "audio" in message:
+                        await save_audio(message)
+
+                    if "document" in message:
+                        result = await update_database(message["document"])
+                        await send_message(chat_id, result)
+
+                    if "text" in message and message["text"] == "/list":
+                        await send_database(chat_id)
 
                 elif "inline_query" in update:
                     inline_query = update["inline_query"]
-                    print(f"کوئری اینلاین جدید: {inline_query}")
                     await handle_inline_query(inline_query["id"], inline_query["query"])
-
-                else:
-                    print("⚠️ آپدیت نامرتبط دریافت شد و نادیده گرفته می‌شود.")
 
             await asyncio.sleep(1)
 
         except httpx.HTTPError as e:
-            print(f"❌ خطای HTTP در check_updates: {e}")
+            print(f"❌ خطای HTTP: {e}")
             traceback.print_exc()
             await asyncio.sleep(5)
         except Exception as e:
-            print(f"❌ خطای ناشناخته در check_updates: {e}")
+            print(f"❌ خطای ناشناخته: {e}")
             traceback.print_exc()
             await asyncio.sleep(5)
 
