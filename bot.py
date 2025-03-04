@@ -56,19 +56,27 @@ async def forward_and_store_from_main_channel(message):
         })
         print("فوروارد از کانال اصلی:", response.json())
 
-async def handle_inline_archive_channel(audio):
-    await update_inline_database(audio, str(INLINE_ARCHIVE_CHANNEL_ID))
+async def handle_inline_archive_channel(message):
+    audio = message.get("audio")
+    if not audio:
+        print("پیام فاقد فایل صوتی است.")
+        return
 
-async def check_updates():
-    last_update_id = None
-    while True:
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                response = await client.get(f"{BASE_URL}/getUpdates", params={"offset": last_update_id})
-                data = response.json()
-                if data.get("ok"):
-                    for update in data["result"]:
-                        last_update_id = update["update_id"] + 1
+    title = audio.get("title", "Unknown Title")
+    performer = audio.get("performer", "Unknown Performer")
+    file_id = audio["file_id"]
+    chat_id = message["chat"]["id"]
+
+    song_data = {
+        "file_id": file_id,
+        "title": title,
+        "performer": performer,
+        "chat_id": chat_id
+    }
+
+    inline_songs_database.append(song_data)
+    save_inline_database(inline_songs_database)
+    print(f"آهنگ جدید در چنل اینلاین آرشیو ذخیره شد: {title} - {performer}")
                         # بررسی inline query (این بخش را می‌توانید بعداً اضافه کنید)
                         if "inline_query" in update:
                             # inline_query_handler(update["inline_query"])  # در صورت نیاز
