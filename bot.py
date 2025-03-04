@@ -9,7 +9,6 @@ INLINE_CHANNEL_ID = os.getenv("INLINE_CHANNEL_ID")    # کانال آرشیو ا
 DATABASE_FILE = "inline_songs.json"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 TIMEOUT = 20
-IRAN_TZ = pytz.timezone("Asia/Tehran")
 
 def load_database():
     if os.path.exists(DATABASE_FILE):
