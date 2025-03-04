@@ -4,57 +4,94 @@ import asyncio
 import httpx
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ARCHIVE_CHANNEL_ID = os.getenv("ARCHIVE_CHANNEL_ID")
 INLINE_CHANNEL_ID = os.getenv("INLINE_CHANNEL_ID")
-DATABASE_FILE = "inline_songs.json"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+DATABASE_FILE = "inline_songs.json"
 TIMEOUT = 20
 
-def load_inline_database():
+def load_database():
     if os.path.exists(DATABASE_FILE):
         with open(DATABASE_FILE, "r", encoding="utf-8") as file:
             return json.load(file)
     return []
 
-def save_inline_database():
+def save_database(data):
     with open(DATABASE_FILE, "w", encoding="utf-8") as file:
-        json.dump(inline_song_database, file, indent=4, ensure_ascii=False)
+        json.dump(data, file, indent=4, ensure_ascii=False)
 
-inline_song_database = load_inline_database()
+inline_song_database = load_database()
 
 async def send_message(chat_id, text):
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        await client.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text
-        })
+        await client.get(f"{BASE_URL}/sendMessage", params={"chat_id": chat_id, "text": text})
 
-async def send_inline_database(chat_id):
+async def send_file_to_user(chat_id):
     if os.path.exists(DATABASE_FILE):
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with httpx.AsyncClient() as client:
             with open(DATABASE_FILE, "rb") as file:
                 await client.post(f"{BASE_URL}/sendDocument", params={"chat_id": chat_id}, files={"document": file})
     else:
-        await send_message(chat_id, "دیتابیس خالی است!")
+        await send_message(chat_id, "⚠️ دیتابیس خالی است!")
 
-async def forward_to_inline_channel(file_id, title, performer):
+async def forward_and_store(song):
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        response = await client.post(f"{BASE_URL}/sendAudio", json={
+        response = await client.get(f"{BASE_URL}/sendAudio", params={
             "chat_id": INLINE_CHANNEL_ID,
-            "audio": file_id,
-            "caption": f"{title} - {performer}"
+            "audio": song["file_id"],
+            "caption": f"{song['title']} - {song['performer']}"
         })
 
         if response.json().get("ok"):
-            inline_song_database.append({
-                "file_id": file_id,
+            inline_song_database.append(song)
+            save_database(inline_song_database)
+
+async def handle_new_audio(message):
+    audio = message["audio"]
+    file_id = audio["file_id"]
+    title = audio.get("title", "نامشخص")
+    performer = audio.get("performer", "نامشخص")
+    chat_id = message["chat"]["id"]
+
+    for song in inline_song_database:
+        if song["file_id"] == file_id:
+            return
+
+    new_song = {
+        "file_id": file_id,
+        "title": title,
+        "performer": performer
+    }
+
+    if str(chat_id) != INLINE_CHANNEL_ID:
+        await forward_and_store(new_song)
+    else:
+        inline_song_database.append(new_song)
+        save_database(inline_song_database)
+
+async def handle_inline_query(inline_query):
+    query = inline_query.get("query", "").lower()
+    results = []
+
+    for i, song in enumerate(inline_song_database):
+        title = song.get("title", "نامشخص")
+        performer = song.get("performer", "نامشخص")
+        file_id = song["file_id"]
+
+        if query in title.lower() or query in performer.lower():
+            results.append({
+                "type": "audio",
+                "id": str(i),
+                "audio_file_id": file_id,
                 "title": title,
                 "performer": performer
             })
-            save_inline_database()
-            print(f"آهنگ به کانال اینلاین فوروارد و ذخیره شد: {title} - {performer}")
-        else:
-            print(f"خطا در فوروارد: {response.json()}")
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        await client.post(f"{BASE_URL}/answerInlineQuery", json={
+            "inline_query_id": inline_query["id"],
+            "results": results,
+            "cache_time": 0
+        })
 
 async def check_new_messages():
     last_update_id = None
@@ -67,30 +104,21 @@ async def check_new_messages():
                 if data.get("ok"):
                     for update in data["result"]:
                         last_update_id = update["update_id"] + 1
+
+                        if "inline_query" in update:
+                            await handle_inline_query(update["inline_query"])
+                            continue
+
                         message = update.get("message", {})
                         chat_id = message.get("chat", {}).get("id")
                         text = message.get("text", "").strip()
 
-                        if text == "/list":
-                            await send_inline_database(chat_id)
-
+                        if text == "/start":
+                            await send_message(chat_id, "ربات فعال است.")
+                        elif text == "/list":
+                            await send_file_to_user(chat_id)
                         elif "audio" in message:
-                            audio = message["audio"]
-                            title = audio.get("title", "نامشخص")
-                            performer = audio.get("performer", "نامشخص")
-                            file_id = audio.get("file_id")
-
-                            if str(chat_id) == INLINE_CHANNEL_ID:
-                                inline_song_database.append({
-                                    "file_id": file_id,
-                                    "title": title,
-                                    "performer": performer
-                                })
-                                save_inline_database()
-                                print(f"آهنگ در دیتابیس اینلاین ذخیره شد: {title} - {performer}")
-
-                            elif str(chat_id) == ARCHIVE_CHANNEL_ID:
-                                await forward_to_inline_channel(file_id, title, performer)
+                            await handle_new_audio(message)
 
         except Exception as e:
             print(f"⚠️ خطا: {e}")
@@ -99,7 +127,7 @@ async def check_new_messages():
         await asyncio.sleep(3)
 
 async def main():
-    print("ربات فعال شد!")
+    print("ربات فعال شد.")
     await check_new_messages()
 
 if __name__ == "__main__":
