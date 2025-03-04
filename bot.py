@@ -24,8 +24,12 @@ def save_database(data):
 inline_song_database = load_database()
 
 async def send_message(chat_id, text):
-    async with httpx.AsyncClient() as client:
-        await client.get(f"{BASE_URL}/sendMessage", params={"chat_id": chat_id, "text": text})
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            await client.get(f"{BASE_URL}/sendMessage", params={"chat_id": chat_id, "text": text})
+    except httpx.HTTPError as e:
+        print(f"❌ خطا در ارسال پیام: {e}")
+        traceback.print_exc()
 
 async def handle_document(document, chat_id):
     if document["file_name"] != DATABASE_FILE:
@@ -33,11 +37,16 @@ async def handle_document(document, chat_id):
         return
 
     file_id = document["file_id"]
-    async with httpx.AsyncClient() as client:
-        file_info = await client.get(f"{BASE_URL}/getFile", params={"file_id": file_id})
-        file_path = file_info.json()["result"]["file_path"]
-        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-        response = await client.get(file_url)
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            file_info = await client.get(f"{BASE_URL}/getFile", params={"file_id": file_id})
+            file_path = file_info.json()["result"]["file_path"]
+            file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+            response = await client.get(file_url)
+    except httpx.HTTPError as e:
+        print(f"❌ خطا در دریافت فایل دیتابیس: {e}")
+        traceback.print_exc()
+        return
 
     with open(DATABASE_FILE, "wb") as file:
         file.write(response.content)
@@ -46,30 +55,34 @@ async def handle_document(document, chat_id):
     await send_message(chat_id, f"✅ دیتابیس بروزرسانی شد. تعداد آهنگ‌ها: {len(inline_song_database)}")
 
 async def send_file_to_user(chat_id):
-    if os.path.exists(DATABASE_FILE):
-        async with httpx.AsyncClient() as client:
+    if not os.path.exists(DATABASE_FILE):
+        await send_message(chat_id, "❌ دیتابیس یافت نشد.")
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             with open(DATABASE_FILE, "rb") as file:
                 await client.post(
                     f"{BASE_URL}/sendDocument",
                     params={"chat_id": chat_id},
                     files={"document": (DATABASE_FILE, file, "application/json")}
                 )
-    else:
-        await send_message(chat_id, "❌ دیتابیس یافت نشد.")
+    except httpx.HTTPError as e:
+        print(f"❌ خطا در ارسال فایل دیتابیس: {e}")
+        traceback.print_exc()
 
 async def handle_archive_channel(message):
     if "audio" in message:
-        audio = message["audio"]
-        file_id = audio["file_id"]
-        title = audio.get("title", "نامشخص")
-        performer = audio.get("performer", "نامشخص")
-
-        async with httpx.AsyncClient() as client:
-            await client.get(f"{BASE_URL}/copyMessage", params={
-                "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
-                "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
-                "message_id": message["message_id"]
-            })
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                await client.get(f"{BASE_URL}/copyMessage", params={
+                    "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
+                    "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
+                    "message_id": message["message_id"]
+                })
+        except httpx.HTTPError as e:
+            print(f"❌ خطا در فوروارد پیام: {e}")
+            traceback.print_exc()
 
 async def save_song_from_inline_channel(message):
     try:
@@ -105,12 +118,16 @@ async def handle_inline_query(query_id, query):
                 "performer": song["performer"]
             })
 
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/answerInlineQuery", json={
-            "inline_query_id": query_id,
-            "results": results,
-            "cache_time": 0
-        })
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            await client.post(f"{BASE_URL}/answerInlineQuery", json={
+                "inline_query_id": query_id,
+                "results": results,
+                "cache_time": 0
+            })
+    except httpx.HTTPError as e:
+        print(f"❌ خطا در پاسخ به اینلاین کوئری: {e}")
+        traceback.print_exc()
 
 async def check_updates():
     last_update_id = None
@@ -161,8 +178,12 @@ async def check_updates():
 
             await asyncio.sleep(1)
 
+        except httpx.HTTPError as e:
+            print(f"❌ خطای HTTP در check_updates: {e}")
+            traceback.print_exc()
+            await asyncio.sleep(5)
         except Exception as e:
-            print(f"❌ خطا در check_updates: {e}")
+            print(f"❌ خطای ناشناخته در check_updates: {e}")
             traceback.print_exc()
             await asyncio.sleep(5)
 
