@@ -48,7 +48,11 @@ async def send_file_to_user(chat_id):
     if os.path.exists(DATABASE_FILE):
         async with httpx.AsyncClient() as client:
             with open(DATABASE_FILE, "rb") as file:
-                await client.post(f"{BASE_URL}/sendDocument", params={"chat_id": chat_id}, files={"document": file})
+                await client.post(
+                    f"{BASE_URL}/sendDocument",
+                    params={"chat_id": chat_id},
+                    files={"document": (DATABASE_FILE, file, "application/json")}
+                )
     else:
         await send_message(chat_id, "❌ دیتابیس یافت نشد.")
 
@@ -60,23 +64,13 @@ async def handle_archive_channel(message):
         performer = audio.get("performer", "نامشخص")
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{BASE_URL}/copyMessage", params={
+            await client.get(f"{BASE_URL}/copyMessage", params={
                 "chat_id": INLINE_ARCHIVE_CHANNEL_ID,
                 "from_chat_id": MAIN_ARCHIVE_CHANNEL_ID,
                 "message_id": message["message_id"]
             })
-            result = response.json()
-            if result.get("ok"):
-                inline_song_database.append({
-                    "file_id": file_id,
-                    "title": title,
-                    "performer": performer,
-                    "chat_id": INLINE_ARCHIVE_CHANNEL_ID
-                })
-                save_database(inline_song_database)
-                print(f"آهنگ جدید از آرشیو اصلی ذخیره شد: {title} - {performer}")
 
-async def handle_inline_archive_channel(message):
+async def save_song_from_inline_channel(message):
     if "audio" in message:
         audio = message["audio"]
         file_id = audio["file_id"]
@@ -90,7 +84,7 @@ async def handle_inline_archive_channel(message):
             "chat_id": INLINE_ARCHIVE_CHANNEL_ID
         })
         save_database(inline_song_database)
-        print(f"آهنگ جدید از آرشیو اینلاین ذخیره شد: {title} - {performer}")
+        print(f"آهنگ جدید ذخیره شد: {title} - {performer}")
 
 async def handle_inline_query(query_id, query):
     results = []
@@ -129,12 +123,13 @@ async def check_updates():
 
                     if "document" in message:
                         await handle_document(message["document"], chat_id)
-                    elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
-                        await handle_inline_archive_channel(message)
                     elif chat_id == MAIN_ARCHIVE_CHANNEL_ID:
                         await handle_archive_channel(message)
-                    elif "text" in message and message["text"] == "/list":
-                        await send_file_to_user(chat_id)
+                    elif chat_id == INLINE_ARCHIVE_CHANNEL_ID:
+                        await save_song_from_inline_channel(message)
+                    elif chat_id != MAIN_ARCHIVE_CHANNEL_ID and chat_id != INLINE_ARCHIVE_CHANNEL_ID:
+                        if "text" in message and message["text"] == "/list":
+                            await send_file_to_user(chat_id)
 
                 elif inline_query:
                     await handle_inline_query(inline_query["id"], inline_query["query"])
